@@ -15,19 +15,31 @@
         return match ? Math.min(100, parseFloat(match[1])) : null;
     }
 
-    function decorateStat(labelEl) {
+    // DOM shape (confirmed against filament/filament v5.7.5
+    // packages/widgets/resources/views/stats-overview-widget/stat.blade.php):
+    // <div class="fi-wi-stats-overview-stat"> <!-- statCard -->
+    //   <div class="fi-wi-stats-overview-stat-content">
+    //     <div class="fi-wi-stats-overview-stat-label-ctn">
+    //       <span class="fi-wi-stats-overview-stat-label">CPU</span>
+    //     </div>
+    //     <div class="fi-wi-stats-overview-stat-value">47 %</div>
+    // Note: querying by exact class token (not a substring match) matters here —
+    // "fi-wi-stats-overview-stat-label" itself contains "fi-wi-stats-overview-stat"
+    // as a substring, so a substring-based `.closest()` from the label resolves to
+    // the label span itself rather than walking up to the real container.
+    function decorateStat(statCard) {
+        const labelEl = statCard.querySelector('.fi-wi-stats-overview-stat-label');
+        if (!labelEl) {
+            return;
+        }
+
         const label = labelEl.textContent.trim();
         const gauge = GAUGE_LABELS.find((g) => g.match.test(label));
-        if (!gauge) {
+        if (!gauge || statCard.querySelector('.ex-gauge-track')) {
             return;
         }
 
-        const statCard = labelEl.closest('[class*="fi-wi-stats-overview-stat"]') ?? labelEl.parentElement?.parentElement;
-        if (!statCard || statCard.querySelector('.ex-gauge-track')) {
-            return;
-        }
-
-        const valueEl = statCard.querySelector('[class*="fi-wi-stats-overview-stat-value"]') ?? statCard.querySelector('div + div');
+        const valueEl = statCard.querySelector('.fi-wi-stats-overview-stat-value');
         if (!valueEl) {
             return;
         }
@@ -44,9 +56,7 @@
     }
 
     function decorateGauges() {
-        document
-            .querySelectorAll('[class*="fi-wi-stats-overview-stat-label"], [class*="fi-wi-stats-overview-stat"] > div:first-child')
-            .forEach(decorateStat);
+        document.querySelectorAll('.fi-wi-stats-overview-stat').forEach(decorateStat);
     }
 
     const CONSOLE_THEME = {
