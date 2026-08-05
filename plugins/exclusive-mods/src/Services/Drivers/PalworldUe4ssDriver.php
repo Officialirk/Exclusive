@@ -52,8 +52,13 @@ class PalworldUe4ssDriver implements ModManagerDriverInterface
 
         /** @var DaemonFileRepository $files */
         $files = app(DaemonFileRepository::class)->setServer($server);
-        $files->pull($fileUrl, $path, ['filename' => $archiveName]);
-        $files->decompressFile($path, $archiveName);
+        // ->throw() matters here: pull() can return a failed response instead
+        // of throwing on its own (confirmed against the real
+        // pelican-dev/plugins/minecraft-modrinth installer, which does the
+        // same) - without it, a failed download falls through into
+        // decompressFile() against a file that was never written.
+        $files->pull($fileUrl, $path, ['filename' => $archiveName])->throw();
+        $files->decompressFile($path, $archiveName)->throw();
     }
 
     public function uninstall(Server $server, Mod $mod): void
