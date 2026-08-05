@@ -1,4 +1,4 @@
-<x-filament::widget>
+<x-filament::widget wire:poll.10s>
     <x-filament::section>
         <x-slot name="heading">
             Players Online — {{ count($this->getPlayers()) }}

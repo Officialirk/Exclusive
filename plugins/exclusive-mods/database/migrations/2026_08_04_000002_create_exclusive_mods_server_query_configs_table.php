@@ -10,7 +10,12 @@ return new class extends Migration
     {
         Schema::create('exclusive_mods_server_query_configs', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('server_id')->constrained('servers')->cascadeOnDelete();
+            // servers.id is a plain unsignedInteger (created via increments()),
+            // not unsignedBigInteger - foreignId() would mismatch the column
+            // type and fail the FK constraint on MySQL (mirrors the pattern in
+            // core's own backups table migration).
+            $table->unsignedInteger('server_id');
+            $table->foreign('server_id')->references('id')->on('servers')->cascadeOnDelete();
             $table->unsignedSmallInteger('rest_api_port')->nullable();
             $table->text('rest_api_password')->nullable();
             $table->timestamps();
