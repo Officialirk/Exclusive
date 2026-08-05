@@ -35,12 +35,22 @@ else (install/update/uninstall/UI) keeps working.
 
 ### Steam Workshop
 
-- **Add from Steam Workshop** button — paste a Workshop URL or item ID
-- Downloads the item, drops it into `Mods/Workshop/<id>/` and reads its
-  `Info.json` to enable it in `Mods/PalModSettings.ini`
-  (`bGlobalEnableMod=true` + `ActiveModList=<PackageName>`) — the same
-  mechanism Palworld's official 1.0+ mod loader uses, so no manual folder
-  guessing is needed for these
+- A **Steam Workshop** browse/search tab, if you've set a Steam Web API key
+  (see Setup below) — without a key, that tab is empty but everything else
+  still works
+- **Add from Steam Workshop** button — paste a Workshop URL or item ID directly,
+  no key needed for this
+- For items Steam exposes a direct download for: installs into
+  `Mods/Workshop/<id>/` and reads its `Info.json` to enable it in
+  `Mods/PalModSettings.ini` (`bGlobalEnableMod=true` +
+  `ActiveModList=<PackageName>`) — the same mechanism Palworld's official
+  1.0+ mod loader uses
+- **In practice, most real Workshop items don't have a direct download**
+  (see the caveat below) — for those, a **Register uploaded mod** button lets
+  you finish the last step yourself: download the item via SteamCMD/Steam
+  elsewhere, upload the folder into `Mods/Workshop/` via the panel's file
+  manager, then Register just reads its `Info.json` and wires it into
+  `PalModSettings.ini` for you
 - Update checks against Steam's own "last updated" timestamp for the item
 
 ### Both
@@ -60,7 +70,23 @@ else (install/update/uninstall/UI) keeps working.
    - the tag `palworld` to the egg's **Tags**, or
    - the feature `palworld_mods` to the egg's **Features**
 
+   (Not both mixed up — it checks `palworld` specifically in **Tags**, and
+   `palworld_mods` specifically in **Features**. One or the other, in the
+   right box.)
+
    Servers using that egg will then get a **Mods** entry in their sidebar.
+4. *(Optional)* To enable the Steam Workshop **browse/search** tab, get a free
+   key at [steamcommunity.com/dev/apikey](https://steamcommunity.com/dev/apikey)
+   and set it as an environment variable on your panel:
+   ```
+   PALWORLD_MODS_STEAM_API_KEY=your-key-here
+   ```
+   Add that to the panel's `.env` file (however your host manages panel env
+   vars), then restart/reload the panel. Never put a real key directly into
+   `config/palworld-mods.php` or commit one anywhere — the `.env` approach
+   keeps it out of version control. This step is entirely optional: adding a
+   specific mod by URL/ID, and installing/registering it, both work without
+   a key.
 
 ## Notes & limitations
 
@@ -75,15 +101,17 @@ else (install/update/uninstall/UI) keeps working.
   have UE4SS set up for `ue4ss/Mods` Lua mods to do anything.
 - The Thunderstore package list is cached for 15 minutes per panel instance to
   keep things fast and avoid hammering their API.
-- **Steam Workshop caveat:** the plugin fetches Workshop items through Steam's
-  public `GetPublishedFileDetails` API and downloads them via the same direct
-  `file_url` most Palworld Workshop packages expose (they're just zip files,
-  not full Steam depots). If a specific item genuinely has no direct download —
-  Steam returns an empty `file_url` — the plugin can't fetch it and will tell
-  you so; that content would need SteamCMD's authenticated
-  `workshop_download_item` flow instead, which isn't something a panel plugin
-  can trigger (it would mean giving the plugin shell/SteamCMD access on the
-  server, a much larger trust boundary than a panel plugin should ask for).
+- **Steam Workshop caveat (the important one):** the plugin fetches Workshop
+  item metadata through Steam's public `GetPublishedFileDetails` API, and
+  *can* download a mod directly when Steam's response includes a `file_url` —
+  but in practice, **most real Palworld Workshop items don't have one**; they
+  live in Steam's authenticated depot-download system instead
+  (`steamcmd +workshop_download_item`), which no plain HTTP request — keyed or
+  not — can reach. When that's the case the plugin tells you clearly instead
+  of failing silently; use the **Register uploaded mod** action after placing
+  the files yourself. Giving the plugin shell/SteamCMD access to actually run
+  that download itself isn't something this plugin will ever do — that's a
+  much bigger trust boundary than a panel plugin should ask for.
 - Workshop mods that ship an `Info.json` with `InstallRule.IsServer: false`
   (client-only mods, e.g. pure UI/keybind mods) will still get placed in
   `Mods/Workshop/`, but Palworld's own mod loader — not this plugin — decides

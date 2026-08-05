@@ -430,6 +430,80 @@ class PalworldModsService
         });
     }
 
+    public function hasSteamApiKey(): bool
+    {
+        return !empty(config('palworld-mods.steam_api_key'));
+    }
+
+    /**
+     * Search/browse the Steam Workshop for Palworld items. Requires a Steam
+     * Web API key (config('palworld-mods.steam_api_key')) — returns an empty
+     * result set without one rather than failing.
+     *
+     * @return array{data: array<int, array<string, mixed>>, total: int}
+     */
+    public function searchWorkshopItems(int $page = 1, string $search = '', int $perPage = 15): array
+    {
+        $apiKey = config('palworld-mods.steam_api_key');
+
+        if (empty($apiKey)) {
+            return ['data' => [], 'total' => 0];
+        }
+
+        return Cache::remember("palworld_mods:workshop_search:$page:" . md5($search), now()->addMinutes(15), function () use ($apiKey, $page, $search) {
+            try {
+                $params = [
+                    'key' => $apiKey,
+                    'appid' => self::STEAM_APP_ID,
+                    'numperpage' => 15,
+                    'page' => $page,
+                    'return_short_description' => true,
+                    'return_previews' => true,
+                    // query_type 12 = RankedByTextSearch (needed for search_text to actually
+                    // affect ranking), 1 = RankedByVote (a reasonable "most popular" default).
+                    'query_type' => $search !== '' ? 12 : 1,
+                ];
+
+                if ($search !== '') {
+                    $params['search_text'] = $search;
+                }
+
+                $response = Http::asForm()
+                    ->timeout(10)
+                    ->connectTimeout(5)
+                    ->throw()
+                    ->get('https://api.steampowered.com/IPublishedFileService/QueryFiles/v1/', $params)
+                    ->json();
+
+                $files = $response['response']['publishedfiledetails'] ?? [];
+                $total = (int) ($response['response']['total'] ?? count($files));
+
+                $data = collect($files)
+                    ->filter(fn ($file) => (int) ($file['result'] ?? 1) === 1)
+                    ->map(fn ($file) => [
+                        'full_name' => 'workshop-' . $file['publishedfileid'],
+                        'workshop_id' => $file['publishedfileid'],
+                        'title' => $file['title'] ?? 'Untitled',
+                        'description' => $file['short_description'] ?? ($file['description'] ?? ''),
+                        'preview_url' => $file['preview_url'] ?? null,
+                        'file_url' => $file['file_url'] ?? null,
+                        'file_size' => (int) ($file['file_size'] ?? 0),
+                        'time_updated' => (int) ($file['time_updated'] ?? 0),
+                        'subscriptions' => (int) ($file['subscriptions'] ?? 0),
+                        'workshop_url' => "https://steamcommunity.com/sharedfiles/filedetails/?id={$file['publishedfileid']}",
+                    ])
+                    ->values()
+                    ->all();
+
+                return ['data' => $data, 'total' => $total];
+            } catch (Exception $exception) {
+                report($exception);
+
+                return ['data' => [], 'total' => 0];
+            }
+        });
+    }
+
     /**
      * Download and deploy a Steam Workshop item into Mods/Workshop, then enable
      * it in Mods/PalModSettings.ini using the PackageName from its Info.json.
@@ -483,6 +557,35 @@ class PalworldModsService
         if ($packageName) {
             $this->removeActiveMod($server, $packageName);
         }
+    }
+
+    /**
+     * For mods that can't be pulled directly (no direct Steam file_url) —
+     * you download it via SteamCMD/the Steam client yourself and upload the
+     * resulting folder into Mods/Workshop/<folderName>/ via the file manager.
+     * This reads its Info.json and enables it, same as a normal install.
+     *
+     * @return array{folder: string, package_name: string}
+     *
+     * @throws Exception
+     */
+    public function registerExistingWorkshopMod(Server $server, string $folderName): array
+    {
+        $fileRepository = app(DaemonFileRepository::class);
+        $fileRepository->setServer($server);
+
+        $folder = self::WORKSHOP_FOLDER . '/' . $folderName;
+
+        $packageName = $this->findPackageName($fileRepository, $folder);
+
+        if (!$packageName) {
+            throw new Exception("Couldn't find a valid Info.json with a PackageName in Mods/Workshop/$folderName — check the folder was uploaded/extracted there correctly.");
+        }
+
+        $this->setModSettingsEnabled($server, true);
+        $this->addActiveMod($server, $packageName);
+
+        return ['folder' => $folderName, 'package_name' => $packageName];
     }
 
     /**

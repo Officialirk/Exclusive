@@ -82,7 +82,8 @@ class PalworldModsPage extends Page implements HasTable
     public function getTabs(): array
     {
         return [
-            'browse' => Tab::make('Browse'),
+            'browse' => Tab::make('Browse (Thunderstore)'),
+            'workshop' => Tab::make('Steam Workshop'),
             'installed' => Tab::make('Installed'),
         ];
     }
@@ -113,20 +114,36 @@ class PalworldModsPage extends Page implements HasTable
                     return new LengthAwarePaginator($installed, count($installed), 15, $page);
                 }
 
+                if ($this->activeTab === 'workshop') {
+                    $response = PalworldMods::searchWorkshopItems($page, $search ?? '');
+
+                    return new LengthAwarePaginator($response['data'], $response['total'], 15, $page);
+                }
+
                 $response = PalworldMods::getPackages($page, $search ?? '');
 
                 return new LengthAwarePaginator($response['data'], $response['total'], 15, $page);
             })
             ->paginated([15])
-            ->columns($this->activeTab === 'installed' ? $this->installedColumns() : $this->browseColumns())
+            ->columns(match ($this->activeTab) {
+                'installed' => $this->installedColumns(),
+                'workshop' => $this->workshopColumns(),
+                default => $this->browseColumns(),
+            })
             ->recordUrl(function (array $record) {
                 if ($this->activeTab === 'installed') {
                     return null;
                 }
 
-                return $record['package_url'] ?? null;
+                return $record['package_url'] ?? $record['workshop_url'] ?? null;
             }, true)
-            ->recordActions($this->activeTab === 'installed' ? $this->installedActions() : $this->browseActions());
+            ->recordActions(match ($this->activeTab) {
+                'installed' => $this->installedActions(),
+                'workshop' => $this->workshopActions(),
+                default => $this->browseActions(),
+            })
+            ->emptyStateHeading(fn () => $this->activeTab === 'workshop' && !PalworldMods::hasSteamApiKey() ? 'Steam API key not configured' : null)
+            ->emptyStateDescription(fn () => $this->activeTab === 'workshop' && !PalworldMods::hasSteamApiKey() ? 'Set PALWORLD_MODS_STEAM_API_KEY in your panel\'s .env to enable Steam Workshop search. You can still add a specific mod above by URL/ID.' : null);
     }
 
     /** @return array<int, \Filament\Tables\Columns\Column> */
@@ -153,6 +170,33 @@ class PalworldModsPage extends Page implements HasTable
             TextColumn::make('date_updated')
                 ->icon('tabler-calendar')
                 ->formatStateUsing(fn ($state) => $state ? Carbon::parse($state)->diffForHumans() : 'Unknown')
+                ->toggleable(),
+        ];
+    }
+
+    /** @return array<int, \Filament\Tables\Columns\Column> */
+    protected function workshopColumns(): array
+    {
+        return [
+            ImageColumn::make('preview_url')
+                ->label(''),
+            TextColumn::make('title')
+                ->searchable()
+                ->description(fn (array $record) => strlen($record['description']) > 120 ? substr($record['description'], 0, 120) . '...' : $record['description']),
+            TextColumn::make('subscriptions')
+                ->label('Subscribers')
+                ->icon('tabler-download')
+                ->numeric()
+                ->toggleable(),
+            TextColumn::make('time_updated')
+                ->label('Updated')
+                ->icon('tabler-calendar')
+                ->formatStateUsing(fn ($state) => $state ? Carbon::createFromTimestamp((int) $state)->diffForHumans() : 'Unknown')
+                ->toggleable(),
+            TextColumn::make('file_url')
+                ->label('')
+                ->formatStateUsing(fn ($state) => $state ? '' : 'Manual install only')
+                ->color('warning')
                 ->toggleable(),
         ];
     }
@@ -265,6 +309,37 @@ class PalworldModsPage extends Page implements HasTable
                         $this->performUninstall($installed);
                     }
                 }),
+        ];
+    }
+
+    /** @return array<int, Action> */
+    protected function workshopActions(): array
+    {
+        return [
+            Action::make('install')
+                ->iconButton()
+                ->icon('tabler-download')
+                ->color('success')
+                ->tooltip('Install')
+                ->visible(fn (array $record) => !empty($record['file_url']) && is_null(PalworldMods::getInstalledMod($this->server(), $record['full_name'])))
+                ->requiresConfirmation()
+                ->modalHeading('Install mod')
+                ->modalDescription(fn (array $record) => "Install {$record['title']} from the Steam Workshop?")
+                ->action(fn (array $record) => $this->performWorkshopInstall($record['workshop_id'])),
+            Action::make('manual_only')
+                ->iconButton()
+                ->icon('tabler-alert-triangle')
+                ->color('warning')
+                ->tooltip("No direct download available — install via SteamCMD, then use \"Register uploaded mod\" above")
+                ->disabled()
+                ->visible(fn (array $record) => empty($record['file_url']) && is_null(PalworldMods::getInstalledMod($this->server(), $record['full_name']))),
+            Action::make('installed')
+                ->iconButton()
+                ->icon('tabler-check')
+                ->color('success')
+                ->tooltip('Installed')
+                ->disabled()
+                ->visible(fn (array $record) => !is_null(PalworldMods::getInstalledMod($this->server(), $record['full_name']))),
         ];
     }
 
@@ -490,6 +565,71 @@ class PalworldModsPage extends Page implements HasTable
         }
     }
 
+    /**
+     * For Workshop items with no direct file_url: you've already downloaded
+     * it via SteamCMD/Steam and uploaded the folder into Mods/Workshop
+     * yourself via the file manager. This just reads its Info.json and
+     * enables it, same as a normal install would.
+     */
+    protected function performWorkshopRegister(string $folder, ?string $workshopInput = null): void
+    {
+        try {
+            $server = $this->server();
+
+            $folder = trim($folder, "/ \t\n\r\0\x0B");
+
+            if ($folder === '' || str_contains($folder, '/') || str_contains($folder, '..')) {
+                throw new Exception('Enter just the folder name under Mods/Workshop, not a full path.');
+            }
+
+            $result = PalworldMods::registerExistingWorkshopMod($server, $folder);
+
+            $item = null;
+            if (!empty($workshopInput)) {
+                $workshopId = PalworldMods::resolveWorkshopId($workshopInput);
+                $item = $workshopId ? PalworldMods::getSteamWorkshopItem($workshopId) : null;
+            }
+
+            $saved = PalworldMods::saveModMetadata(
+                $server,
+                'workshop-' . $folder,
+                $item['title'] ?? $folder,
+                'Steam Workshop',
+                $item ? (string) $item['time_updated'] : now()->toIso8601String(),
+                self::WORKSHOP_TARGET_FOLDER,
+                [$folder],
+                $item['preview_url'] ?? null,
+                [
+                    'source' => 'steam_workshop',
+                    'workshop_id' => $item['workshop_id'] ?? null,
+                    'package_name' => $result['package_name'],
+                ],
+            );
+
+            if (!$saved) {
+                throw new Exception('Failed to save mod metadata');
+            }
+
+            $this->resetTable();
+
+            Notification::make()
+                ->title('Mod registered')
+                ->body("{$result['package_name']} was enabled from Mods/Workshop/$folder")
+                ->success()
+                ->send();
+        } catch (Exception $exception) {
+            report($exception);
+
+            $this->resetTable();
+
+            Notification::make()
+                ->title('Register failed')
+                ->body($exception->getMessage())
+                ->danger()
+                ->send();
+        }
+    }
+
     protected function getHeaderActions(): array
     {
         return [
@@ -506,6 +646,22 @@ class PalworldModsPage extends Page implements HasTable
                 ])
                 ->modalSubmitActionLabel('Install')
                 ->action(fn (array $data) => $this->performWorkshopInstall($data['input'])),
+            Action::make('register_workshop_item')
+                ->label('Register uploaded mod')
+                ->icon('tabler-folder-check')
+                ->schema([
+                    TextInput::make('folder')
+                        ->label('Folder name under Mods/Workshop')
+                        ->placeholder('e.g. 3765577035')
+                        ->helperText('The folder you already uploaded/extracted there via the file manager, containing Info.json.')
+                        ->required(),
+                    TextInput::make('workshop_url')
+                        ->label('Steam Workshop URL or ID (optional)')
+                        ->placeholder('https://steamcommunity.com/sharedfiles/filedetails/?id=...')
+                        ->helperText('Only used to show a nicer name/icon in the Installed tab.'),
+                ])
+                ->modalSubmitActionLabel('Register')
+                ->action(fn (array $data) => $this->performWorkshopRegister($data['folder'], $data['workshop_url'] ?? null)),
             Action::make('open_logicmods')
                 ->label('LogicMods folder')
                 ->icon('tabler-folder-open')
