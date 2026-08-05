@@ -1,0 +1,20 @@
+{
+    "id": "exclusive-mods",
+    "name": "Exclusive Mods",
+    "author": "Exclusive",
+    "version": "1.0.0",
+    "description": "Steam Workshop mod management for game servers (Palworld/UE4SS first) plus a Players Online console widget.",
+    "category": "plugin",
+    "url": null,
+    "update_url": null,
+    "namespace": "Exclusive\\Mods",
+    "class": "ExclusiveModsPlugin",
+    "panels": ["server"],
+    "panel_version": null,
+    "composer_packages": null,
+    "meta": {
+        "status": "disabled",
+        "status_message": null,
+        "load_order": 1
+    }
+}

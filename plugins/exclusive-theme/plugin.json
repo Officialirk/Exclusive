@@ -1,0 +1,20 @@
+{
+    "id": "exclusive-theme",
+    "name": "Exclusive Theme",
+    "author": "Exclusive",
+    "version": "1.0.0",
+    "description": "A dark void/gold luxury reskin of the panel — colors, fonts, gauges and console retinting.",
+    "category": "theme",
+    "url": null,
+    "update_url": null,
+    "namespace": "Exclusive\\Theme",
+    "class": "ExclusiveThemePlugin",
+    "panels": ["admin", "app", "server"],
+    "panel_version": null,
+    "composer_packages": null,
+    "meta": {
+        "status": "disabled",
+        "status_message": null,
+        "load_order": 0
+    }
+}
