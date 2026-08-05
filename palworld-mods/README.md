@@ -8,6 +8,16 @@ It lets users browse, install, update and uninstall Palworld mods from
 [Steam Workshop](https://steamcommunity.com/app/1623730/workshop/) directly from
 the server's panel view — no manual SFTP/upload/unzip required.
 
+> **⚠️ If your server runs the Linux dedicated server binary (`PalServer-Linux-Shipping`),
+> read this before touching the Steam Workshop tab.** Palworld's official Steam
+> Workshop mod loader (`Mods/Workshop/`, `Mods/PalModSettings.ini`) **only runs on
+> Windows dedicated servers.** On Linux, the game binary never reads those files at
+> all — this isn't a bug in the plugin, it's a Pocketpair platform limitation. The
+> **Thunderstore tab works fine on both platforms** (pak/LogicMods mods are mounted
+> by the game engine directly, unrelated to Steam Workshop). For UE4SS/Lua mods on
+> Linux specifically, see [UE4SS on Linux (unofficial)](#ue4ss-on-linux-unofficial)
+> below — it's a different, community-maintained path, not this loader.
+
 ## Why Thunderstore?
 
 Palworld doesn't have a single official mod hub. The two realistic options for an
@@ -53,13 +63,32 @@ else (install/update/uninstall/UI) keeps working.
   `PalModSettings.ini` for you
 - Update checks against Steam's own "last updated" timestamp for the item
 
+### UE4SS on Linux (unofficial)
+
+For Linux dedicated servers, where the official Steam Workshop loader above
+doesn't run at all — a community-maintained
+[Linux port of UE4SS](https://www.nexusmods.com/palworld/mods/4557) is a
+separate way to get Lua mods working. This plugin automates the one piece of
+it that's pure file I/O:
+
+- **Write UE4SS Linux settings** button — drops a `UE4SS-settings.ini` with
+  sensible defaults into `Pal/Binaries/Linux/`
+- A status badge showing whether `libUE4SS.so` has been placed there yet
+
+It does **not** download `libUE4SS.so` for you (Nexus Mods requires a login,
+same reason Nexus wasn't used for the main mod browser — see below) and does
+**not** edit your egg's startup command to add the required `LD_PRELOAD` —
+that's a config change to how your server actually launches, deliberately
+left as a manual, explicit step rather than something a mod-browser plugin
+silently rewrites. Full walkthrough in Notes & limitations below.
+
 ### Both
 
 - Tracks everything it installed (in a `.palworld-mods-metadata.json` file on
   the server) so it can offer **Update** and **Uninstall**, from either source,
   in one unified "Installed" tab
-- Quick links to open the LogicMods / UE4SS Mods / Workshop folders in the
-  file manager
+- Quick links to open the LogicMods / UE4SS Mods / Workshop / Linux binaries
+  folders in the file manager
 - **Install SteamCMD** button — downloads the Linux SteamCMD build into a
   `steamcmd/` folder on the server. Read the caveat below before expecting
   this to fully automate Workshop downloads — it doesn't, by itself.
@@ -151,6 +180,35 @@ else (install/update/uninstall/UI) keeps working.
     Add that before the game launch command runs, and a `WORKSHOP_IDS`
     startup variable to the egg. Untested as-is against a live egg — treat it
     as a starting point, not a drop-in guarantee.
+- **The Steam Workshop mod loader (`Mods/Workshop/`, `Mods/PalModSettings.ini`)
+  is Windows-dedicated-server-only, confirmed against a real server.** If your
+  server runs `PalServer-Linux-Shipping`, every install/register action in the
+  Steam Workshop tab will "succeed" (the plugin writes correct files) but the
+  game will never read any of it — no error, just silent inertia, because the
+  Linux binary has no code path for this feature at all. This was found the
+  hard way, on a real server, after the fact — sorry for the run-around if
+  you hit this. The Thunderstore tab is unaffected; pak/LogicMods mods don't
+  go through Steam Workshop at all.
+- **Getting Lua mods working on a Linux server instead (unofficial, unverified
+  end-to-end):**
+  1. Download `libUE4SS.so` from the
+     [Linux UE4SS port on Nexus](https://www.nexusmods.com/palworld/mods/4557)
+     yourself (requires a Nexus login — same API-key/auth wall that ruled out
+     Nexus for the main mod browser) and upload it into `Pal/Binaries/Linux/`
+     via the panel's file manager.
+  2. Click **Write UE4SS Linux settings** in this plugin to generate
+     `UE4SS-settings.ini` next to it.
+  3. Edit your egg's **Startup Command** (Admin → Nests → your egg → Startup)
+     to prefix the actual server binary invocation with
+     `LD_PRELOAD=/home/container/Pal/Binaries/Linux/libUE4SS.so` (adjust the
+     path if your container's home directory differs). This is a manual edit
+     you make — the plugin won't touch your startup command automatically,
+     that's too high-blast-radius an action for a mod browser to do silently.
+  4. Restart the server.
+
+  This plugin cannot verify step 3 works for your specific egg/setup; it's
+  based on the Linux UE4SS port's own documented install instructions, not
+  tested against a live Palworld server by this plugin's author.
 
 ## License
 

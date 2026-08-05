@@ -704,6 +704,40 @@ class PalworldModsPage extends Page implements HasTable
                             ->send();
                     }
                 }),
+            Action::make('open_linux_binaries')
+                ->label('Pal/Binaries/Linux folder')
+                ->icon('tabler-folder-open')
+                ->url(fn () => ListFiles::getUrl(['path' => 'Pal/Binaries/Linux']), true),
+            Action::make('write_ue4ss_linux_settings')
+                ->label('Write UE4SS Linux settings')
+                ->icon('tabler-brand-debian')
+                ->color('gray')
+                ->requiresConfirmation()
+                ->modalHeading('Write UE4SS-settings.ini')
+                ->modalDescription(
+                    "Writes a UE4SS-settings.ini with sensible defaults into Pal/Binaries/Linux.\n\n"
+                    . "This is for the UNOFFICIAL community Linux port of UE4SS — Palworld's official Steam Workshop mod loader (the Mods/Workshop tab above) only works on Windows dedicated servers. You still need to: download libUE4SS.so yourself (it's Nexus Mods-hosted, needs a login) and upload it into Pal/Binaries/Linux via the file manager, then add LD_PRELOAD=/home/container/Pal/Binaries/Linux/libUE4SS.so to your egg's startup command. This button only handles the settings file — see the plugin README for the full, unverified walkthrough."
+                )
+                ->modalSubmitActionLabel('Write file')
+                ->action(function () {
+                    try {
+                        PalworldMods::writeUE4SSLinuxSettings($this->server());
+
+                        Notification::make()
+                            ->title('UE4SS-settings.ini written')
+                            ->body('Into Pal/Binaries/Linux. See the README for the remaining manual steps.')
+                            ->success()
+                            ->send();
+                    } catch (Exception $exception) {
+                        report($exception);
+
+                        Notification::make()
+                            ->title('Failed to write settings')
+                            ->body($exception->getMessage())
+                            ->danger()
+                            ->send();
+                    }
+                }),
         ];
     }
 
@@ -724,6 +758,11 @@ class PalworldModsPage extends Page implements HasTable
                             ->state(fn () => PalworldMods::isSteamCmdInstalled($server) ? 'Downloaded' : 'Not downloaded')
                             ->badge()
                             ->color(fn ($state) => $state === 'Downloaded' ? 'success' : 'gray'),
+                        TextEntry::make('ue4ss_linux')
+                            ->label('UE4SS (Linux, unofficial)')
+                            ->state(fn () => PalworldMods::isUE4SSLinuxInstalled($server) ? 'libUE4SS.so found' : 'Not found')
+                            ->badge()
+                            ->color(fn ($state) => $state === 'libUE4SS.so found' ? 'success' : 'gray'),
                     ]),
                 $this->getTabsContentComponent(),
                 EmbeddedTable::make(),

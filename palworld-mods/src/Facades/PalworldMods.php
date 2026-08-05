@@ -28,6 +28,8 @@ use Officialirk\PalworldMods\Services\PalworldModsService;
  * @method static void setModSettingsEnabled(Server $server, bool $enabled)
  * @method static void addActiveMod(Server $server, string $packageName)
  * @method static void removeActiveMod(Server $server, string $packageName)
+ * @method static bool isUE4SSLinuxInstalled(Server $server)
+ * @method static void writeUE4SSLinuxSettings(Server $server)
  *
  * @see PalworldModsService
  */

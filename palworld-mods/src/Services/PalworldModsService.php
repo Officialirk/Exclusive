@@ -42,6 +42,15 @@ class PalworldModsService
     protected const STEAMCMD_DOWNLOAD_URL = 'https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz';
 
     /**
+     * Where the (community, non-official) Linux UE4SS port lives — next to
+     * the Linux dedicated server binary. Palworld's *official* Steam Workshop
+     * mod loader (Mods/Workshop, PalModSettings.ini) is Windows-server only;
+     * this is the separate, unofficial path some people use to get Lua mods
+     * running on Linux servers instead.
+     */
+    protected const UE4SS_LINUX_FOLDER = 'Pal/Binaries/Linux';
+
+    /**
      * Folders mods can be installed into, keyed by path relative to the server root.
      *
      * @return array<string, string>
@@ -309,7 +318,7 @@ class PalworldModsService
             ->throw();
 
         // Clean up the archive itself; it's not part of the mod payload.
-        $fileRepository->deleteFiles($targetFolder, [$zipName]);
+        $this->deleteFilesQuietly($fileRepository, $targetFolder, [$zipName]);
 
         $after = $this->listFolderEntries($fileRepository, $targetFolder);
 
@@ -558,7 +567,7 @@ class PalworldModsService
             ->decompressFile($folder, $archiveName)
             ->throw();
 
-        $fileRepository->deleteFiles($folder, [$archiveName]);
+        $this->deleteFilesQuietly($fileRepository, $folder, [$archiveName]);
 
         // Best-effort; SteamCMD bootstraps some of this itself on first run,
         // so a partial/failed chmod here isn't fatal.
@@ -570,6 +579,80 @@ class PalworldModsService
         } catch (Exception $exception) {
             report($exception);
         }
+    }
+
+    /**
+     * Deletes files and, unlike a bare deleteFiles() call, actually notices
+     * and logs it if the daemon reports failure — cleanup steps like removing
+     * a downloaded archive shouldn't abort the whole operation on failure,
+     * but silently ignoring it means leftover files with no trace of why.
+     *
+     * @param  array<int, string>  $files
+     */
+    protected function deleteFilesQuietly(DaemonFileRepository $fileRepository, string $root, array $files): void
+    {
+        try {
+            $response = $fileRepository->deleteFiles($root, $files);
+
+            if ($response->failed()) {
+                report(new Exception("Failed to delete " . implode(', ', $files) . " in $root: HTTP {$response->status()}"));
+            }
+        } catch (Exception $exception) {
+            report($exception);
+        }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | UE4SS Linux port (unofficial)
+    |--------------------------------------------------------------------------
+    |
+    | Palworld's OFFICIAL Steam Workshop mod loader (Mods/Workshop above) only
+    | runs on Windows dedicated servers. On Linux, some users instead run a
+    | community-maintained Linux port of UE4SS (libUE4SS.so + LD_PRELOAD) to
+    | get Lua-based mods working. That .so file is Nexus Mods-hosted, which
+    | needs a logged-in session/API key to download — the plugin can't fetch
+    | it for you. This just covers the piece that IS pure file automation.
+    |
+    */
+
+    public function isUE4SSLinuxInstalled(Server $server): bool
+    {
+        try {
+            $files = app(DaemonFileRepository::class)->setServer($server)->getDirectory(self::UE4SS_LINUX_FOLDER);
+
+            if (!is_array($files) || isset($files['error'])) {
+                return false;
+            }
+
+            return collect($files)->contains(fn ($file) => strtolower($file['name'] ?? '') === 'libue4ss.so');
+        } catch (Exception) {
+            return false;
+        }
+    }
+
+    /**
+     * Writes a UE4SS-settings.ini with sensible defaults next to where
+     * libUE4SS.so needs to go. Doesn't download/require the .so file itself
+     * to exist yet — you can run this before or after uploading it.
+     *
+     * @throws Exception
+     */
+    public function writeUE4SSLinuxSettings(Server $server): void
+    {
+        $ini = <<<'INI'
+        [UE4SS]
+        EnableHotReloadSystem=true
+        EnableAutoReloadingLuaMods=true
+        UseCache=true
+        InvalidateCacheIfDLLDiffers=true
+        EnableDebugKeyBindings=false
+        INI;
+
+        app(DaemonFileRepository::class)
+            ->setServer($server)
+            ->putContent(self::UE4SS_LINUX_FOLDER . '/UE4SS-settings.ini', $ini)
+            ->throw();
     }
 
     /**
@@ -601,7 +684,7 @@ class PalworldModsService
             ->decompressFile($folder, $zipName)
             ->throw();
 
-        $fileRepository->deleteFiles($folder, [$zipName]);
+        $this->deleteFilesQuietly($fileRepository, $folder, [$zipName]);
 
         $packageName = $this->findPackageName($fileRepository, $folder);
 
