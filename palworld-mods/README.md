@@ -76,17 +76,19 @@ else (install/update/uninstall/UI) keeps working.
 
    Servers using that egg will then get a **Mods** entry in their sidebar.
 4. *(Optional)* To enable the Steam Workshop **browse/search** tab, get a free
-   key at [steamcommunity.com/dev/apikey](https://steamcommunity.com/dev/apikey)
-   and set it as an environment variable on your panel:
-   ```
-   PALWORLD_MODS_STEAM_API_KEY=your-key-here
-   ```
-   Add that to the panel's `.env` file (however your host manages panel env
-   vars), then restart/reload the panel. Never put a real key directly into
-   `config/palworld-mods.php` or commit one anywhere — the `.env` approach
-   keeps it out of version control. This step is entirely optional: adding a
-   specific mod by URL/ID, and installing/registering it, both work without
-   a key.
+   key at [steamcommunity.com/dev/apikey](https://steamcommunity.com/dev/apikey),
+   then go to **Admin → Plugins → Palworld Mods → Settings** and paste it into
+   the **Steam Web API key** field. The panel writes it to its own `.env` for
+   you — no server/shell access needed, and it's never stored in this plugin's
+   code or committed anywhere.
+
+   (If you do have shell access to the panel and would rather set it directly,
+   you can instead add `PALWORLD_MODS_STEAM_API_KEY=your-key-here` to the
+   panel's `.env` file and run `php artisan config:clear` — same result,
+   either way works.)
+
+   This step is entirely optional: adding a specific mod by URL/ID, and
+   installing/registering it, both work without a key.
 
 ## Notes & limitations
 
