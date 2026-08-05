@@ -1,8 +1,9 @@
 # Exclusive Theme
 
-A dark void/gold "luxury" reskin of Pelican Panel — custom fonts (IBM Plex Mono,
-Inter, Playfair Display), a gold/void color palette, gauge-style CPU/Memory/Disk
-bars on the server Console page, and a retinted console/terminal.
+A dark void/gold color palette and custom font set for Pelican Panel — built
+entirely through Filament's built-in panel customization API (`colors()` +
+`font()`/`monoFont()`/`serifFont()`), the same pattern Pelican's own reference
+theme plugin uses ([pterodactyl-theme](https://github.com/pelican-dev/plugins/tree/main/pterodactyl-theme)).
 
 ## Installation
 
@@ -10,16 +11,21 @@ bars on the server Console page, and a retinted console/terminal.
 2. In the admin panel, go to **Plugins**, find "Exclusive Theme", and install it.
 3. Enable it. Only one theme plugin can be active at a time.
 
+No build step is required — this plugin ships no custom CSS/JS and no Vite
+assets, so there's nothing for `yarn build` to need to pick up for it
+specifically.
+
 ## Notes / known limitations
 
-This plugin only retints the panel's existing markup via CSS and a small amount
-of client-side JS — it does not fork any core Blade views. As a result:
-
-- The sidebar's server-switcher list keeps its default Filament structure and
-  layout; only its colors/borders are retinted, not its bespoke card layout
-  from the original mockup.
-- The CPU/Memory/Disk gauge bars and the console's color palette are applied by
-  JavaScript after each render (see `resources/js/theme.js`), since the
-  underlying widgets are core-owned. This is a deliberate trade-off to avoid
-  editing core files; the visual match will be close but not pixel-perfect in
-  every case.
+An earlier version of this plugin shipped a custom `theme.css`/`theme.js`
+bundle wired through a Filament render hook and `@vite()`, to get gauge-style
+CPU/Memory/Disk bars and a retinted console terminal beyond what `colors()`/
+`font()` can do alone. That approach depends on a successful `yarn build`
+having produced a Vite manifest entry for the plugin's assets — on servers
+where that build doesn't run (or fails, e.g. a missing `yarn`/`node`
+toolchain, or a background queue worker not running to process the install
+job), every page throws "Unable to locate file in Vite manifest" instead of
+silently degrading. This version trades away those extra visual touches
+(gauge bars, console retint, bespoke sidebar styling) for something that
+can't break that way — colors and fonts only, applied via the same
+mechanism Pelican's own theme plugin uses.
