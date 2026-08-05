@@ -60,6 +60,9 @@ else (install/update/uninstall/UI) keeps working.
   in one unified "Installed" tab
 - Quick links to open the LogicMods / UE4SS Mods / Workshop folders in the
   file manager
+- **Install SteamCMD** button — downloads the Linux SteamCMD build into a
+  `steamcmd/` folder on the server. Read the caveat below before expecting
+  this to fully automate Workshop downloads — it doesn't, by itself.
 
 ## Setup
 
@@ -118,6 +121,36 @@ else (install/update/uninstall/UI) keeps working.
   (client-only mods, e.g. pure UI/keybind mods) will still get placed in
   `Mods/Workshop/`, but Palworld's own mod loader — not this plugin — decides
   at runtime whether to actually deploy them for a dedicated server.
+- **"Install SteamCMD" only downloads the files — it can't run them.** The
+  panel-to-server API this plugin (and every Pelican plugin) has access to is
+  file operations only: upload, download, extract, delete. There is no
+  "execute a shell command inside the container" capability, deliberately —
+  that would mean any plugin author could run arbitrary code on your server,
+  which is a security hole no mod manager is worth opening. So this button
+  gets `steamcmd.sh` onto the server, but *running* it to fetch Workshop
+  content (`./steamcmd.sh +login anonymous +workshop_download_item ...`)
+  needs one of:
+  - Direct shell/exec access to that server's container, if your host
+    provides it (separate from panel access), where you can just run it
+    yourself, or
+  - Your egg's **startup command** invoking it automatically when the
+    container boots. This is a config change on the egg itself (Admin →
+    Nests → your egg → Startup), not something a plugin can inject — but if
+    you can edit it, something like this in the startup script, driven by a
+    `WORKSHOP_IDS` startup variable (comma-separated item IDs), does the job:
+    ```bash
+    if [ -n "${WORKSHOP_IDS}" ] && [ -f ./steamcmd/steamcmd.sh ]; then
+      IFS=',' read -ra IDS <<< "$WORKSHOP_IDS"
+      for id in "${IDS[@]}"; do
+        ./steamcmd/steamcmd.sh +login anonymous +workshop_download_item 1623730 "$id" +quit
+        mkdir -p "Mods/Workshop/$id"
+        cp -r "steamcmd/steamapps/workshop/content/1623730/$id/"* "Mods/Workshop/$id/" 2>/dev/null
+      done
+    fi
+    ```
+    Add that before the game launch command runs, and a `WORKSHOP_IDS`
+    startup variable to the egg. Untested as-is against a live egg — treat it
+    as a starting point, not a drop-in guarantee.
 
 ## License
 

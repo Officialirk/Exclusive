@@ -674,6 +674,36 @@ class PalworldModsPage extends Page implements HasTable
                 ->label('Workshop folder')
                 ->icon('tabler-folder-open')
                 ->url(fn () => ListFiles::getUrl(['path' => self::WORKSHOP_TARGET_FOLDER]), true),
+            Action::make('install_steamcmd')
+                ->label(fn () => PalworldMods::isSteamCmdInstalled($this->server()) ? 'Reinstall SteamCMD' : 'Install SteamCMD')
+                ->icon('tabler-terminal-2')
+                ->color('gray')
+                ->requiresConfirmation()
+                ->modalHeading('Install SteamCMD')
+                ->modalDescription(
+                    "Downloads the Linux SteamCMD build into a steamcmd/ folder on this server.\n\n"
+                    . "Important: this only places the files there. This plugin (and the panel in general) has no way to actually run commands inside the server's container — that's a deliberate security boundary. To use it, you still need either shell/exec access to this server's container, or your egg's startup command set up to invoke it automatically on boot. See the plugin's README for details."
+                )
+                ->modalSubmitActionLabel('Install')
+                ->action(function () {
+                    try {
+                        PalworldMods::installSteamCmd($this->server());
+
+                        Notification::make()
+                            ->title('SteamCMD downloaded')
+                            ->body('Extracted into the steamcmd/ folder. See the README for how to actually run it.')
+                            ->success()
+                            ->send();
+                    } catch (Exception $exception) {
+                        report($exception);
+
+                        Notification::make()
+                            ->title('SteamCMD install failed')
+                            ->body($exception->getMessage())
+                            ->danger()
+                            ->send();
+                    }
+                }),
         ];
     }
 
@@ -689,6 +719,11 @@ class PalworldModsPage extends Page implements HasTable
                             ->label('Installed mods')
                             ->state(fn () => count(PalworldMods::getInstalledMods($server)))
                             ->badge(),
+                        TextEntry::make('steamcmd')
+                            ->label('SteamCMD')
+                            ->state(fn () => PalworldMods::isSteamCmdInstalled($server) ? 'Downloaded' : 'Not downloaded')
+                            ->badge()
+                            ->color(fn ($state) => $state === 'Downloaded' ? 'success' : 'gray'),
                     ]),
                 $this->getTabsContentComponent(),
                 EmbeddedTable::make(),

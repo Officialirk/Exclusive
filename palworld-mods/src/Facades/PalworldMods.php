@@ -20,6 +20,8 @@ use Officialirk\PalworldMods\Services\PalworldModsService;
  * @method static array<string, mixed>|null getSteamWorkshopItem(string $workshopId)
  * @method static bool hasSteamApiKey()
  * @method static array{data: array<int, array<string, mixed>>, total: int} searchWorkshopItems(int $page = 1, string $search = '', int $perPage = 15)
+ * @method static bool isSteamCmdInstalled(Server $server)
+ * @method static void installSteamCmd(Server $server)
  * @method static array{folder: string, package_name: string} installWorkshopItem(Server $server, array $item)
  * @method static array{folder: string, package_name: string} registerExistingWorkshopMod(Server $server, string $folderName)
  * @method static void removeWorkshopItem(Server $server, string $workshopId, ?string $packageName)

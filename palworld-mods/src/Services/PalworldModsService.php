@@ -31,6 +31,17 @@ class PalworldModsService
     protected const MOD_SETTINGS_PATH = 'Mods/PalModSettings.ini';
 
     /**
+     * Folder SteamCMD gets downloaded into on the server.
+     */
+    protected const STEAMCMD_FOLDER = 'steamcmd';
+
+    /**
+     * Valve's official, stable download link for the Linux SteamCMD build.
+     * See https://developer.valvesoftware.com/wiki/SteamCMD
+     */
+    protected const STEAMCMD_DOWNLOAD_URL = 'https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz';
+
+    /**
      * Folders mods can be installed into, keyed by path relative to the server root.
      *
      * @return array<string, string>
@@ -502,6 +513,63 @@ class PalworldModsService
                 return ['data' => [], 'total' => 0];
             }
         });
+    }
+
+    public function isSteamCmdInstalled(Server $server): bool
+    {
+        try {
+            $files = app(DaemonFileRepository::class)->setServer($server)->getDirectory(self::STEAMCMD_FOLDER);
+
+            if (!is_array($files) || isset($files['error'])) {
+                return false;
+            }
+
+            return collect($files)->contains(fn ($file) => strtolower($file['name'] ?? '') === 'steamcmd.sh');
+        } catch (Exception) {
+            return false;
+        }
+    }
+
+    /**
+     * Downloads and extracts the Linux SteamCMD build into a steamcmd/ folder
+     * on the server.
+     *
+     * IMPORTANT: this only places the files there. The panel/this plugin has
+     * no way to actually execute SteamCMD inside the server's container —
+     * that needs either shell access to the container, or the egg's own
+     * startup command invoking it (e.g. on every boot, using a startup
+     * variable listing Workshop IDs to fetch). See the README.
+     *
+     * @throws Exception
+     */
+    public function installSteamCmd(Server $server): void
+    {
+        $fileRepository = app(DaemonFileRepository::class);
+        $fileRepository->setServer($server);
+
+        $folder = self::STEAMCMD_FOLDER;
+        $archiveName = 'steamcmd_linux.tar.gz';
+
+        $fileRepository
+            ->pull(self::STEAMCMD_DOWNLOAD_URL, $folder, ['filename' => $archiveName, 'foreground' => true])
+            ->throw();
+
+        $fileRepository
+            ->decompressFile($folder, $archiveName)
+            ->throw();
+
+        $fileRepository->deleteFiles($folder, [$archiveName]);
+
+        // Best-effort; SteamCMD bootstraps some of this itself on first run,
+        // so a partial/failed chmod here isn't fatal.
+        try {
+            $fileRepository->chmodFiles($folder, [
+                ['file' => 'steamcmd.sh', 'mode' => '0755'],
+                ['file' => 'linux32/steamcmd', 'mode' => '0755'],
+            ]);
+        } catch (Exception $exception) {
+            report($exception);
+        }
     }
 
     /**
