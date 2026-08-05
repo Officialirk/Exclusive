@@ -1,0 +1,17 @@
+{
+    "id": "palworld-mods",
+    "name": "Palworld Mods",
+    "author": "Officialirk",
+    "version": "1.0.0",
+    "description": "Browse, install, update and remove Palworld mods from Thunderstore directly from the server panel",
+    "category": "plugin",
+    "url": "https://github.com/Officialirk/Exclusive/tree/main/palworld-mods",
+    "update_url": null,
+    "namespace": "Officialirk\\PalworldMods",
+    "class": "PalworldModsPlugin",
+    "panels": [
+        "server"
+    ],
+    "panel_version": null,
+    "composer_packages": null
+}
