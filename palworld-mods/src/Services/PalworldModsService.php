@@ -16,6 +16,21 @@ class PalworldModsService
     protected const COMMUNITY = 'palworld';
 
     /**
+     * Palworld's Steam App ID, used to build Workshop links.
+     */
+    protected const STEAM_APP_ID = '1623730';
+
+    /**
+     * Folder the official Palworld mod loader reads Steam Workshop packages from.
+     */
+    protected const WORKSHOP_FOLDER = 'Mods/Workshop';
+
+    /**
+     * The mod loader's config file: enables mods and lists which packages are active.
+     */
+    protected const MOD_SETTINGS_PATH = 'Mods/PalModSettings.ini';
+
+    /**
      * Folders mods can be installed into, keyed by path relative to the server root.
      *
      * @return array<string, string>
@@ -183,6 +198,7 @@ class PalworldModsService
 
     /**
      * @param  array<int, string>  $entries
+     * @param  array<string, mixed>  $extra  Extra fields to store, e.g. ['source' => 'steam_workshop', 'workshop_id' => ..., 'package_name' => ...]
      */
     public function saveModMetadata(
         Server $server,
@@ -193,9 +209,10 @@ class PalworldModsService
         string $targetFolder,
         array $entries,
         ?string $iconUrl = null,
+        array $extra = [],
     ): bool {
         try {
-            return Cache::lock("palworld_mods_metadata:{$server->id}", 10)->block(5, function () use ($server, $fullName, $name, $owner, $versionNumber, $targetFolder, $entries, $iconUrl) {
+            return Cache::lock("palworld_mods_metadata:{$server->id}", 10)->block(5, function () use ($server, $fullName, $name, $owner, $versionNumber, $targetFolder, $entries, $iconUrl, $extra) {
                 $fileRepository = app(DaemonFileRepository::class);
 
                 $installedMods = collect($this->getInstalledMods($server))
@@ -203,7 +220,7 @@ class PalworldModsService
                     ->values()
                     ->all();
 
-                $installedMods[] = [
+                $installedMods[] = array_merge([
                     'full_name' => $fullName,
                     'name' => $name,
                     'owner' => $owner,
@@ -212,7 +229,8 @@ class PalworldModsService
                     'entries' => $entries,
                     'icon_url' => $iconUrl,
                     'installed_at' => now()->toIso8601String(),
-                ];
+                    'source' => 'thunderstore',
+                ], $extra);
 
                 $response = $fileRepository->setServer($server)->putContent(
                     $this->getMetadataFilePath(),
@@ -333,5 +351,243 @@ class PalworldModsService
             // Folder likely doesn't exist yet; that's fine, it'll be created by the pull.
             return [];
         }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Steam Workshop
+    |--------------------------------------------------------------------------
+    |
+    | Since Palworld's "Home Sweet Home" (1.0) update, dedicated servers load
+    | mods through an official loader: a package (with an Info.json describing
+    | it) is dropped into Mods/Workshop/<folder>/ and enabled by listing its
+    | PackageName in Mods/PalModSettings.ini. This is a different, simpler
+    | mechanism than the raw Thunderstore extraction above, so it gets its own
+    | install/uninstall path — but reuses the same installed-mods metadata file.
+    |
+    */
+
+    /**
+     * Pull a Steam Workshop item ID out of a raw ID or a workshop URL.
+     */
+    public function resolveWorkshopId(string $input): ?string
+    {
+        $input = trim($input);
+
+        if (preg_match('/^\d+$/', $input)) {
+            return $input;
+        }
+
+        if (preg_match('/[?&]id=(\d+)/', $input, $matches)) {
+            return $matches[1];
+        }
+
+        return null;
+    }
+
+    /**
+     * Look up a Steam Workshop item via Steam's public (keyless) web API.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function getSteamWorkshopItem(string $workshopId): ?array
+    {
+        return Cache::remember("palworld_mods:workshop_item:$workshopId", now()->addMinutes(15), function () use ($workshopId) {
+            try {
+                $response = Http::asForm()
+                    ->timeout(10)
+                    ->connectTimeout(5)
+                    ->throw()
+                    ->post('https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/', [
+                        'itemcount' => 1,
+                        'publishedfileids[0]' => $workshopId,
+                    ])
+                    ->json();
+
+                $details = $response['response']['publishedfiledetails'][0] ?? null;
+
+                // result === 1 means "found"; anything else (9 = not found, etc.) is a miss.
+                if (!is_array($details) || (int) ($details['result'] ?? 0) !== 1) {
+                    return null;
+                }
+
+                return [
+                    'workshop_id' => $workshopId,
+                    'title' => $details['title'] ?? "Workshop item $workshopId",
+                    'description' => $details['description'] ?? '',
+                    'preview_url' => $details['preview_url'] ?? null,
+                    'file_url' => $details['file_url'] ?? null,
+                    'file_size' => (int) ($details['file_size'] ?? 0),
+                    'time_updated' => (int) ($details['time_updated'] ?? 0),
+                    'subscriptions' => (int) ($details['subscriptions'] ?? 0),
+                    'workshop_url' => "https://steamcommunity.com/sharedfiles/filedetails/?id=$workshopId",
+                ];
+            } catch (Exception $exception) {
+                report($exception);
+
+                return null;
+            }
+        });
+    }
+
+    /**
+     * Download and deploy a Steam Workshop item into Mods/Workshop, then enable
+     * it in Mods/PalModSettings.ini using the PackageName from its Info.json.
+     *
+     * @param  array<string, mixed>  $item
+     * @return array{folder: string, package_name: string}
+     *
+     * @throws Exception
+     */
+    public function installWorkshopItem(Server $server, array $item): array
+    {
+        if (empty($item['file_url'])) {
+            throw new Exception("This Workshop item doesn't expose a direct download through Steam's API, so it can't be fetched from the panel. Install it via SteamCMD/the Steam client and copy it into Mods/Workshop instead.");
+        }
+
+        $fileRepository = app(DaemonFileRepository::class);
+        $fileRepository->setServer($server);
+
+        $folder = self::WORKSHOP_FOLDER . '/' . $item['workshop_id'];
+        $zipName = $item['workshop_id'] . '.zip';
+
+        $fileRepository
+            ->pull($item['file_url'], $folder, ['filename' => $zipName, 'foreground' => true])
+            ->throw();
+
+        $fileRepository
+            ->decompressFile($folder, $zipName)
+            ->throw();
+
+        $fileRepository->deleteFiles($folder, [$zipName]);
+
+        $packageName = $this->findPackageName($fileRepository, $folder);
+
+        if (!$packageName) {
+            throw new Exception("Couldn't find a valid Info.json with a PackageName in this Workshop item — it doesn't look like a Palworld mod package.");
+        }
+
+        $this->setModSettingsEnabled($server, true);
+        $this->addActiveMod($server, $packageName);
+
+        return ['folder' => (string) $item['workshop_id'], 'package_name' => $packageName];
+    }
+
+    /**
+     * @throws Exception
+     */
+    public function removeWorkshopItem(Server $server, string $workshopId, ?string $packageName): void
+    {
+        $this->removePackageFiles($server, self::WORKSHOP_FOLDER, [$workshopId]);
+
+        if ($packageName) {
+            $this->removeActiveMod($server, $packageName);
+        }
+    }
+
+    /**
+     * Look for Info.json directly inside the given folder, or one level of
+     * nesting deep (some package zips wrap everything in an extra folder).
+     */
+    protected function findPackageName(DaemonFileRepository $fileRepository, string $folder): ?string
+    {
+        $direct = $this->tryReadPackageName($fileRepository, "$folder/Info.json");
+        if ($direct) {
+            return $direct;
+        }
+
+        foreach ($this->listFolderEntries($fileRepository, $folder) as $entry) {
+            $nested = $this->tryReadPackageName($fileRepository, "$folder/$entry/Info.json");
+            if ($nested) {
+                return $nested;
+            }
+        }
+
+        return null;
+    }
+
+    protected function tryReadPackageName(DaemonFileRepository $fileRepository, string $path): ?string
+    {
+        try {
+            $data = json_decode($fileRepository->getContent($path), true);
+
+            return is_array($data) ? ($data['PackageName'] ?? null) : null;
+        } catch (Exception) {
+            return null;
+        }
+    }
+
+    protected function readModSettings(Server $server): string
+    {
+        try {
+            return app(DaemonFileRepository::class)->setServer($server)->getContent(self::MOD_SETTINGS_PATH);
+        } catch (Exception) {
+            // File doesn't exist yet; the game normally generates it after first launch.
+            return "[PalModSettings]\nbGlobalEnableMod=false\n";
+        }
+    }
+
+    /**
+     * @throws Exception
+     */
+    protected function writeModSettings(Server $server, string $content): void
+    {
+        app(DaemonFileRepository::class)->setServer($server)->putContent(self::MOD_SETTINGS_PATH, $content)->throw();
+    }
+
+    /**
+     * @throws Exception
+     */
+    public function setModSettingsEnabled(Server $server, bool $enabled): void
+    {
+        $content = $this->readModSettings($server);
+        $value = $enabled ? 'true' : 'false';
+
+        if (preg_match('/^bGlobalEnableMod\s*=.*$/mi', $content)) {
+            $content = preg_replace('/^bGlobalEnableMod\s*=.*$/mi', "bGlobalEnableMod=$value", $content);
+        } else {
+            $content = rtrim($content) . "\nbGlobalEnableMod=$value\n";
+        }
+
+        $this->writeModSettings($server, $content);
+    }
+
+    /**
+     * @throws Exception
+     */
+    public function addActiveMod(Server $server, string $packageName): void
+    {
+        $content = $this->readModSettings($server);
+
+        if (in_array($packageName, $this->getActiveMods($content), true)) {
+            return;
+        }
+
+        $content = rtrim($content) . "\nActiveModList=$packageName\n";
+
+        $this->writeModSettings($server, $content);
+    }
+
+    /**
+     * @throws Exception
+     */
+    public function removeActiveMod(Server $server, string $packageName): void
+    {
+        $content = $this->readModSettings($server);
+
+        $lines = array_filter(
+            preg_split('/\r\n|\r|\n/', $content),
+            fn ($line) => !preg_match('/^ActiveModList\s*=\s*' . preg_quote($packageName, '/') . '\s*$/i', trim($line))
+        );
+
+        $this->writeModSettings($server, implode("\n", $lines));
+    }
+
+    /** @return array<int, string> */
+    protected function getActiveMods(string $content): array
+    {
+        preg_match_all('/^ActiveModList\s*=\s*(.+)$/mi', $content, $matches);
+
+        return array_map('trim', $matches[1] ?? []);
     }
 }

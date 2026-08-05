@@ -4,8 +4,9 @@ A [Pelican Panel](https://pelican.dev) plugin, built the same way as the plugins
 [pelican-dev/plugins](https://github.com/pelican-dev/plugins) (e.g. `rust-umod`, `minecraft-modrinth`).
 
 It lets users browse, install, update and uninstall Palworld mods from
-[Thunderstore](https://thunderstore.io/c/palworld/) directly from the server's file
-management page in the panel — no manual SFTP/upload/unzip required.
+[Thunderstore](https://thunderstore.io/c/palworld/) **and** the official
+[Steam Workshop](https://steamcommunity.com/app/1623730/workshop/) directly from
+the server's panel view — no manual SFTP/upload/unzip required.
 
 ## Why Thunderstore?
 
@@ -24,15 +25,31 @@ else (install/update/uninstall/UI) keeps working.
 
 ## Features
 
+### Thunderstore
+
 - Browse & search the Palworld mod list, sorted by popularity
 - One-click install into a folder you choose:
   - `Pal/Content/Paks/LogicMods` — most Blueprint/pak mods
   - `Pal/Content/Paks/~mods` — legacy pak mods
   - `Pal/Binaries/Win64/ue4ss/Mods` — UE4SS Lua script mods
-- Tracks what it installed (in a `.palworld-mods-metadata.json` file on the server)
-  so it can offer **Update** and **Uninstall** for anything it installed
-- "Installed" tab listing everything the plugin manages on that server
-- Quick links to open the LogicMods / UE4SS Mods folders in the file manager
+
+### Steam Workshop
+
+- **Add from Steam Workshop** button — paste a Workshop URL or item ID
+- Downloads the item, drops it into `Mods/Workshop/<id>/` and reads its
+  `Info.json` to enable it in `Mods/PalModSettings.ini`
+  (`bGlobalEnableMod=true` + `ActiveModList=<PackageName>`) — the same
+  mechanism Palworld's official 1.0+ mod loader uses, so no manual folder
+  guessing is needed for these
+- Update checks against Steam's own "last updated" timestamp for the item
+
+### Both
+
+- Tracks everything it installed (in a `.palworld-mods-metadata.json` file on
+  the server) so it can offer **Update** and **Uninstall**, from either source,
+  in one unified "Installed" tab
+- Quick links to open the LogicMods / UE4SS Mods / Workshop folders in the
+  file manager
 
 ## Setup
 
@@ -58,6 +75,19 @@ else (install/update/uninstall/UI) keeps working.
   have UE4SS set up for `ue4ss/Mods` Lua mods to do anything.
 - The Thunderstore package list is cached for 15 minutes per panel instance to
   keep things fast and avoid hammering their API.
+- **Steam Workshop caveat:** the plugin fetches Workshop items through Steam's
+  public `GetPublishedFileDetails` API and downloads them via the same direct
+  `file_url` most Palworld Workshop packages expose (they're just zip files,
+  not full Steam depots). If a specific item genuinely has no direct download —
+  Steam returns an empty `file_url` — the plugin can't fetch it and will tell
+  you so; that content would need SteamCMD's authenticated
+  `workshop_download_item` flow instead, which isn't something a panel plugin
+  can trigger (it would mean giving the plugin shell/SteamCMD access on the
+  server, a much larger trust boundary than a panel plugin should ask for).
+- Workshop mods that ship an `Info.json` with `InstallRule.IsServer: false`
+  (client-only mods, e.g. pure UI/keybind mods) will still get placed in
+  `Mods/Workshop/`, but Palworld's own mod loader — not this plugin — decides
+  at runtime whether to actually deploy them for a dedicated server.
 
 ## License
 
