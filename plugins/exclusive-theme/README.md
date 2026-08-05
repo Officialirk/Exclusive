@@ -1,9 +1,9 @@
 # Exclusive Theme
 
-A dark void/gold color palette and custom font set for Pelican Panel — built
+A dark navy/amber color palette and custom font set for Pelican Panel — built
 entirely through Filament's built-in panel customization API (`colors()` +
-`font()`/`monoFont()`/`serifFont()`), the same pattern Pelican's own reference
-theme plugin uses ([pterodactyl-theme](https://github.com/pelican-dev/plugins/tree/main/pterodactyl-theme)).
+`font()`/`monoFont()`), the same pattern Pelican's own reference theme plugin
+uses ([pterodactyl-theme](https://github.com/pelican-dev/plugins/tree/main/pterodactyl-theme)).
 
 ## Installation
 
